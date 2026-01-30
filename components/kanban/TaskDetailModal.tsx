@@ -16,9 +16,15 @@ import {
   Edit2,
   Activity,
   AlertCircle,
+  CheckCircle2,
+  Play,
+  XCircle,
 } from "lucide-react"
 import { useState, useEffect } from "react"
 import { Button } from "../ui/Button"
+import { useLogsByTask } from "@/lib/stores/log-store"
+import { useTaskStore } from "@/lib/stores/task-store"
+import { markTaskComplete, logTaskEvent, executeSubtask } from "@/lib/agents/task-manager"
 import type { Task } from "./TaskCard"
 
 interface TaskDetailModalProps {
@@ -28,6 +34,7 @@ interface TaskDetailModalProps {
   onEdit: (task: Task) => void
   onDelete: (taskId: string) => void
   onUpdateSubtasks: (taskId: string, subtasks: Task["subtasks"]) => void
+  onMarkComplete?: (taskId: string, moveToDone?: boolean) => void
 }
 
 const priorityConfig = {
@@ -47,12 +54,6 @@ const statusConfig: Record<string, { color: string; bgColor: string; label: stri
   done: { color: "text-[#22c55e]", bgColor: "bg-[#22c55e]/20", label: "Done" },
 }
 
-// Mock activity log data
-const mockActivityLog = [
-  { id: "1", action: "Task created", user: "System", timestamp: new Date().toISOString() },
-  { id: "2", action: "Status changed to In Progress", user: "coder", timestamp: new Date().toISOString() },
-]
-
 export function TaskDetailModal({
   open,
   onClose,
@@ -60,16 +61,52 @@ export function TaskDetailModal({
   onEdit,
   onDelete,
   onUpdateSubtasks,
+  onMarkComplete,
 }: TaskDetailModalProps) {
   const [subtasks, setSubtasks] = useState<Task["subtasks"]>([])
   const [newSubtask, setNewSubtask] = useState("")
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [executingSubtask, setExecutingSubtask] = useState<string | null>(null)
+
+  // Get real activity logs for this task
+  const activityLogs = useLogsByTask(task?.id || "")
+
+  // Task store actions for direct completion
+  const completeAgentTask = useTaskStore((state) => state.completeAgentTask)
+  const updateTask = useTaskStore((state) => state.updateTask)
 
   useEffect(() => {
     if (task) {
       setSubtasks(task.subtasks || [])
     }
   }, [task])
+
+  // Handle marking task complete
+  const handleMarkComplete = (moveToDone: boolean = false) => {
+    if (!task) return
+
+    if (moveToDone) {
+      updateTask(task.id, { status: 'done', progress: 100 })
+      logTaskEvent('info', `Task "${task.title}" marked as done`, task.id)
+    } else {
+      markTaskComplete(task.id, { reason: 'Manually marked complete' })
+    }
+
+    onMarkComplete?.(task.id, moveToDone)
+    onClose()
+  }
+
+  // Handle executing a subtask with an agent
+  const handleExecuteSubtask = async (subtaskId: string) => {
+    if (!task) return
+
+    setExecutingSubtask(subtaskId)
+    try {
+      await executeSubtask(task.id, subtaskId)
+    } finally {
+      setExecutingSubtask(null)
+    }
+  }
 
   if (!task) return null
 
@@ -274,6 +311,19 @@ export function TaskDetailModal({
                       >
                         {subtask.title}
                       </span>
+                      {!subtask.completed && (
+                        <button
+                          onClick={() => handleExecuteSubtask(subtask.id)}
+                          disabled={executingSubtask === subtask.id}
+                          className={classNames(
+                            "text-theme-500 hover:text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity",
+                            executingSubtask === subtask.id && "animate-pulse opacity-100"
+                          )}
+                          title="Execute with agent"
+                        >
+                          <Play className="w-4 h-4" />
+                        </button>
+                      )}
                       <button
                         onClick={() => deleteSubtask(subtask.id)}
                         className="text-theme-600 hover:text-rose-400 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -310,17 +360,35 @@ export function TaskDetailModal({
                 <h4 className="text-sm font-medium text-theme-400 mb-2 flex items-center gap-2">
                   <Activity className="w-4 h-4" />
                   Activity
+                  {activityLogs.length > 0 && (
+                    <span className="text-theme-500">({activityLogs.length})</span>
+                  )}
                 </h4>
-                <div className="space-y-3 border-l-2 border-theme-700 pl-4 ml-2">
-                  {mockActivityLog.map((activity) => (
-                    <div key={activity.id} className="relative">
-                      <div className="absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full bg-theme-700 border-2 border-theme-800" />
-                      <p className="text-sm text-theme-300">{activity.action}</p>
-                      <p className="text-xs text-theme-500">
-                        by {activity.user} - {format(new Date(activity.timestamp), "MMM d, h:mm a")}
-                      </p>
-                    </div>
-                  ))}
+                <div className="space-y-3 border-l-2 border-theme-700 pl-4 ml-2 max-h-48 overflow-y-auto">
+                  {activityLogs.length > 0 ? (
+                    activityLogs.slice().reverse().map((log) => (
+                      <div key={log.id} className="relative">
+                        <div className={classNames(
+                          "absolute -left-[21px] top-1 w-2.5 h-2.5 rounded-full border-2 border-theme-800",
+                          log.level === 'error' ? 'bg-rose-500' :
+                          log.level === 'warn' ? 'bg-amber-500' :
+                          log.level === 'info' ? 'bg-blue-500' : 'bg-theme-700'
+                        )} />
+                        <p className={classNames(
+                          "text-sm",
+                          log.level === 'error' ? 'text-rose-400' :
+                          log.level === 'warn' ? 'text-amber-400' : 'text-theme-300'
+                        )}>
+                          {log.message}
+                        </p>
+                        <p className="text-xs text-theme-500">
+                          {log.source || 'System'} - {format(new Date(log.timestamp), "MMM d, h:mm a")}
+                        </p>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-theme-500 italic">No activity recorded yet</p>
+                  )}
                 </div>
               </div>
             </div>
@@ -349,6 +417,31 @@ export function TaskDetailModal({
                 Delete Task
               </Button>
             )}
+
+            {/* Completion actions - only show when task is not done */}
+            {task.status !== 'done' && (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => handleMarkComplete(false)}
+                  className="text-purple-400 hover:text-purple-300"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  Mark for Review
+                </Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => handleMarkComplete(true)}
+                  className="bg-emerald-600 hover:bg-emerald-500"
+                >
+                  <CheckCircle2 className="w-4 h-4" />
+                  Mark Done
+                </Button>
+              </div>
+            )}
+
             <Button variant="ghost" onClick={onClose}>
               Close
             </Button>

@@ -541,6 +541,14 @@ export function KanbanBoard({
 
     const selectedAgent = agentId === "auto" ? "orchestrator" : agentId
 
+    // Log task start
+    addLog('info', `Starting task "${agentSelectTask.title}" with agent: ${selectedAgent}`, {
+      taskId: agentSelectTask.id,
+      agentId: selectedAgent,
+      source: 'KanbanBoard',
+      metadata: { action: 'task_started' },
+    })
+
     // Update UI immediately for responsiveness
     // Spawn task via MoltBot API (OpenClaw compliant)
     try {
@@ -556,12 +564,33 @@ export function KanbanBoard({
         // Use store to assign agent - this persists the change
         assignAgentToTask(agentSelectTask.id, response.runId, selectedAgent)
         setActiveAgents((prev) => ({ ...prev, [agentSelectTask.id]: response.runId }))
+
+        // Start monitoring for auto-completion
+        startTaskMonitoring(agentSelectTask.id, {
+          autoComplete: true,
+          autoCompleteTimeout: 30000, // 30 seconds for simple tasks
+          requiresReview: true,
+        })
+
+        addLog('info', `Agent started for task "${agentSelectTask.title}"`, {
+          taskId: agentSelectTask.id,
+          runId: response.runId,
+          agentId: selectedAgent,
+          source: 'KanbanBoard',
+          metadata: { action: 'agent_spawned', runId: response.runId },
+        })
+
         info('Task started', `Agent is working on "${agentSelectTask.title}"`)
       }
 
       onTaskUpdate?.({ ...agentSelectTask, status: "in_progress", assignedAgent: selectedAgent })
     } catch (err) {
       console.error('Failed to spawn agent:', err)
+      addLog('error', `Failed to start agent for task "${agentSelectTask.title}": ${err instanceof Error ? err.message : 'Unknown error'}`, {
+        taskId: agentSelectTask.id,
+        source: 'KanbanBoard',
+        metadata: { error: err instanceof Error ? err.message : String(err) },
+      })
       showError('Failed to start agent', err instanceof Error ? err.message : 'Connection error')
     }
 
@@ -782,6 +811,16 @@ export function KanbanBoard({
         onEdit={handleEditTask}
         onDelete={handleDeleteTask}
         onUpdateSubtasks={handleUpdateSubtasks}
+        onMarkComplete={(taskId, moveToDone) => {
+          // Clear active agent tracking when task is marked complete
+          if (activeAgents[taskId]) {
+            setActiveAgents(prev => {
+              const { [taskId]: _, ...rest } = prev
+              return rest
+            })
+          }
+          success(moveToDone ? 'Task marked as done' : 'Task moved to review')
+        }}
       />
 
       <AgentSelectModal

@@ -41,3 +41,21 @@ export {
   executeTaskWithSwarm,
   getSwarmHealth,
 } from './orchestrator';
+
+// Task Manager - completion detection and decision making
+export {
+  logTaskEvent,
+  decideTaskFate,
+  executeTaskDecision,
+  startTaskMonitoring,
+  stopTaskMonitoring,
+  updateTaskMonitoringProgress,
+  markTaskComplete,
+  executeSubtask,
+  getMonitoredTasks,
+  clearAllMonitoring,
+  DEFAULT_COMPLETION_SETTINGS,
+  type TaskCompletionSettings,
+  type TaskDecision,
+  type TaskDecisionResult,
+} from './task-manager';
