@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-01-30T06:27:18.159Z",
+  "projectRoot": "/mnt/dev/repos/moltbot-dashboard",
+  "structure": {
+    "hasPackageJson": true,
+    "hasTsConfig": true,
+    "hasClaudeConfig": false,
+    "hasClaudeFlow": true
+  },
+  "scannedAt": 1769754438159
+}

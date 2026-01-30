@@ -1,0 +1,1 @@
+export { GitHubIssuesView } from "./GitHubIssuesView"

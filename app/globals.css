@@ -1,0 +1,85 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #0a0a0b;
+  --foreground: #fafafa;
+  --sidebar: #111113;
+  --card: #18181b;
+  --border: #27272a;
+  --muted: #71717a;
+
+  /* Fire/Molten accent colors */
+  --fire-red: #ef4444;
+  --fire-orange: #f97316;
+  --fire-yellow: #fbbf24;
+  --fire-glow: rgba(239, 68, 68, 0.4);
+
+  --red: #ef4444;
+  --green: #22c55e;
+  --blue: #3b82f6;
+  --purple: #a855f7;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #27272a;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3f3f46;
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  /* Fire glow effects for important elements */
+  .glow-fire {
+    box-shadow: 0 0 20px rgba(239, 68, 68, 0.4), 0 0 40px rgba(249, 115, 22, 0.2);
+  }
+
+  .glow-fire-sm {
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.3);
+  }
+
+  .glow-fire-lg {
+    box-shadow: 0 0 30px rgba(239, 68, 68, 0.5), 0 0 60px rgba(249, 115, 22, 0.3);
+  }
+
+  .glow-fire-pulse {
+    animation: fire-pulse 2s ease-in-out infinite;
+  }
+
+  @keyframes fire-pulse {
+    0%, 100% {
+      box-shadow: 0 0 20px rgba(239, 68, 68, 0.4), 0 0 40px rgba(249, 115, 22, 0.2);
+    }
+    50% {
+      box-shadow: 0 0 30px rgba(239, 68, 68, 0.6), 0 0 60px rgba(249, 115, 22, 0.4);
+    }
+  }
+
+  /* Text glow */
+  .text-glow-fire {
+    text-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+  }
+}
