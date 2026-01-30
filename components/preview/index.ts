@@ -1,4 +1,5 @@
 export { DevPreview } from "./DevPreview"
+export { PreviewView } from "./PreviewView"
 export { DevServerControl, detectProjectType } from "./DevServerControl"
 export type {
   ServerStatus,

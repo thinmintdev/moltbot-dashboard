@@ -1,10 +1,12 @@
 export { GlobalHeader } from "./GlobalHeader"
 export { EmptyProjectState } from "./EmptyProjectState"
-export { AppLayout } from "./AppLayout"
+export { AppLayout, VIEW_DEFINITIONS } from "./AppLayout"
 export { Sidebar } from "./Sidebar"
 export { ProjectTabs } from "./ProjectTabs"
+export { ViewTabs } from "./ViewTabs"
 export { Navbar } from "./Navbar"
 export { StatusBar } from "./StatusBar"
-export type { NavigationView } from "./AppLayout"
-export type { ViewType } from "./Navbar"
+
+// Types
+export type { ViewType, ViewTab, ProjectData } from "./AppLayout"
 export type { ProjectTab } from "./ProjectTabs"

@@ -1,15 +1,22 @@
 "use client"
 
 import { useState, useCallback, useEffect, ReactNode } from "react"
-import { ProjectTabs, type ProjectTab } from "./ProjectTabs"
-import { Navbar, type ViewType } from "./Navbar"
+import { Navbar } from "./Navbar"
+import { ViewTabs, ViewTab, ViewType, VIEW_DEFINITIONS } from "./ViewTabs"
 import { StatusBar } from "./StatusBar"
 import { Modal } from "@/components/ui/Modal"
-// SettingsPanel will be used when we wire up all the settings logic
-// import { SettingsPanel } from "@/components/settings/SettingsPanel"
 
 // Re-export types for backwards compatibility
-export type NavigationView = ViewType
+export type { ViewType, ViewTab }
+export { VIEW_DEFINITIONS }
+
+export interface ProjectData {
+  id: string
+  name: string
+  color: string
+  sourceType?: string
+  path?: string
+}
 
 interface RunningAgent {
   id: string
@@ -24,15 +31,17 @@ interface RunningAgent {
 
 interface AppLayoutProps {
   children?: ReactNode
-  // Tab management
-  tabs: ProjectTab[]
-  activeTabId: string | null
-  onSelectTab: (tabId: string) => void
-  onCloseTab: (tabId: string) => void
-  onAddTab: () => void
-  // Navigation
-  activeView: NavigationView
-  onViewChange: (view: NavigationView) => void
+  // Project management
+  projects: ProjectData[]
+  activeProjectId: string | null
+  onProjectChange: (projectId: string) => void
+  onNewProject: () => void
+  // View tabs management
+  viewTabs: ViewTab[]
+  activeViewTabId: string | null
+  onSelectViewTab: (tabId: string) => void
+  onCloseViewTab: (tabId: string) => void
+  onAddViewTab: (type: ViewType) => void
   // Actions
   onNewTask: () => void
   // Optional
@@ -45,13 +54,15 @@ interface AppLayoutProps {
 
 export function AppLayout({
   children,
-  tabs,
-  activeTabId,
-  onSelectTab,
-  onCloseTab,
-  onAddTab,
-  activeView,
-  onViewChange,
+  projects,
+  activeProjectId,
+  onProjectChange,
+  onNewProject,
+  viewTabs,
+  activeViewTabId,
+  onSelectViewTab,
+  onCloseViewTab,
+  onAddViewTab,
   onNewTask,
   hasUpdate,
   version,
@@ -62,22 +73,11 @@ export function AppLayout({
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [agentPanelExpanded, setAgentPanelExpanded] = useState(false)
 
-  // Convert tabs to projects format for Navbar
-  const projects = tabs.map(t => ({
-    id: t.id,
-    name: t.name,
-    color: t.color || "#ef4444"
-  }))
-
   const handleOpenSettings = useCallback(() => {
     setSettingsOpen(true)
   }, [])
 
-  const handleProjectChange = useCallback((projectId: string) => {
-    onSelectTab(projectId)
-  }, [onSelectTab])
-
-  // Keyboard shortcuts
+  // Keyboard shortcuts for views
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Ignore if typing in an input
@@ -85,9 +85,11 @@ export function AppLayout({
         return
       }
 
-      const shortcuts: Record<string, NavigationView> = {
+      // Map shortcuts to view types
+      const shortcuts: Record<string, ViewType> = {
         k: "kanban",
         a: "agents",
+        v: "preview",
         n: "insights",
         d: "roadmap",
         i: "ideation",
@@ -103,7 +105,13 @@ export function AppLayout({
       const key = e.key.toLowerCase()
       if (shortcuts[key]) {
         e.preventDefault()
-        onViewChange(shortcuts[key])
+        // Check if view is already open
+        const existingTab = viewTabs.find(t => t.type === shortcuts[key])
+        if (existingTab) {
+          onSelectViewTab(existingTab.id)
+        } else {
+          onAddViewTab(shortcuts[key])
+        }
       } else if (key === "t") {
         e.preventDefault()
         onNewTask()
@@ -115,7 +123,7 @@ export function AppLayout({
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [onViewChange, onNewTask])
+  }, [viewTabs, onSelectViewTab, onAddViewTab, onNewTask])
 
   // Agent handlers (placeholder - connect to actual agent store)
   const handlePauseAgent = useCallback((agentId: string) => {
@@ -132,37 +140,47 @@ export function AppLayout({
 
   const handleOpenLogs = useCallback((agentId: string) => {
     console.log("Open logs for:", agentId)
-    onViewChange("agents")
-  }, [onViewChange])
+    // Open agents tab
+    const existingTab = viewTabs.find(t => t.type === "agents")
+    if (existingTab) {
+      onSelectViewTab(existingTab.id)
+    } else {
+      onAddViewTab("agents")
+    }
+  }, [viewTabs, onSelectViewTab, onAddViewTab])
 
   const handleExpandAgentPanel = useCallback(() => {
     setAgentPanelExpanded(true)
-    onViewChange("agents")
-  }, [onViewChange])
+    // Open agents tab
+    const existingTab = viewTabs.find(t => t.type === "agents")
+    if (existingTab) {
+      onSelectViewTab(existingTab.id)
+    } else {
+      onAddViewTab("agents")
+    }
+  }, [viewTabs, onSelectViewTab, onAddViewTab])
 
   return (
     <div className="h-screen w-screen bg-[#0a0a0b] flex flex-col overflow-hidden">
-      {/* Top: Navbar */}
+      {/* Top: Navbar with project dropdown */}
       <Navbar
-        currentView={activeView}
-        onViewChange={onViewChange}
-        projects={projects}
-        activeProjectId={activeTabId}
-        onProjectChange={handleProjectChange}
-        onNewProject={onAddTab}
+        projects={projects.map(p => ({ id: p.id, name: p.name, color: p.color || "#ef4444" }))}
+        activeProjectId={activeProjectId}
+        onProjectChange={onProjectChange}
+        onNewProject={onNewProject}
         onNewTask={onNewTask}
         onOpenSettings={handleOpenSettings}
         isConnected={isConnected}
         currentModel={currentModel}
       />
 
-      {/* Project Tabs */}
-      <ProjectTabs
-        tabs={tabs}
-        activeTabId={activeTabId}
-        onSelectTab={onSelectTab}
-        onCloseTab={onCloseTab}
-        onAddTab={onAddTab}
+      {/* View Tabs */}
+      <ViewTabs
+        tabs={viewTabs}
+        activeTabId={activeViewTabId}
+        onSelectTab={onSelectViewTab}
+        onCloseTab={onCloseViewTab}
+        onAddTab={onAddViewTab}
       />
 
       {/* Main content area - full width, no sidebar */}
@@ -218,6 +236,10 @@ export function AppLayout({
               <div className="flex justify-between">
                 <span className="text-[#71717a]">Agent Terminals</span>
                 <kbd className="px-2 py-0.5 bg-[#27272a] rounded text-[#a1a1aa] font-mono">A</kbd>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[#71717a]">Preview</span>
+                <kbd className="px-2 py-0.5 bg-[#27272a] rounded text-[#a1a1aa] font-mono">V</kbd>
               </div>
               <div className="flex justify-between">
                 <span className="text-[#71717a]">Infrastructure</span>

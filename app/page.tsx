@@ -1,17 +1,23 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { AppLayout, type NavigationView, type ProjectTab } from "@/components/layout"
-import { KanbanBoard } from "@/components/kanban/KanbanBoard"
-import { ProjectCreateModal, type ProjectData } from "@/components/project/ProjectCreateModal"
+import { AppLayout, type ViewType, type ViewTab, type ProjectData, VIEW_DEFINITIONS } from "@/components/layout"
+import { KanbanBoard, TaskCreateModal } from "@/components/kanban"
+import { useTaskStore } from "@/lib/stores/task-store"
+import { ProjectCreateModal, type ProjectData as CreateProjectData } from "@/components/project/ProjectCreateModal"
 import { LiveInfrastructureView } from "@/components/infrastructure"
-import { GitHubIssuesView } from "@/components/github"
+import { GitHubIssuesView, GitHubPRsView } from "@/components/github"
 import { MCPOverview } from "@/components/mcp"
 import { AgentsView } from "@/components/agents"
+import { RoadmapView } from "@/components/roadmap"
+import { IdeationView } from "@/components/ideation"
+import { ContextView } from "@/components/context"
+import { InsightsView } from "@/components/insights"
+import { ChangelogView } from "@/components/changelog"
+import { WorktreesView } from "@/components/worktrees"
+import { PreviewView } from "@/components/preview/PreviewView"
 import { useToast } from "@/components/common/Toast"
-import { Loader2, Terminal, Sparkles, Map, Lightbulb, FileText, BookOpen, Wrench, GitBranch, CircleDot, GitPullRequest, Server } from "lucide-react"
-
-const API_BASE = "/api/moltbot"
+import { Loader2, Terminal, Sparkles, Map, Lightbulb, FileText, BookOpen, Wrench, GitBranch, CircleDot, GitPullRequest, Server, Eye } from "lucide-react"
 
 // Parse GitHub owner/repo from path like "github.com/owner/repo"
 function parseGitHubPath(path?: string): { owner: string; repo: string } | null {
@@ -23,7 +29,7 @@ function parseGitHubPath(path?: string): { owner: string; repo: string } | null 
   return null
 }
 
-// Placeholder views for non-Kanban navigation
+// Placeholder views for non-implemented views
 function PlaceholderView({ title, icon: Icon, description }: { title: string; icon: React.ElementType; description: string }) {
   return (
     <div className="h-full flex flex-col items-center justify-center p-8">
@@ -36,10 +42,11 @@ function PlaceholderView({ title, icon: Icon, description }: { title: string; ic
   )
 }
 
-// View components map - keys must match ViewType from Navbar
-const viewComponents: Record<NavigationView, { icon: React.ElementType; title: string; description: string }> = {
-  kanban: { icon: () => null, title: "", description: "" }, // Special case - actual component
+// View components map
+const viewComponents: Record<ViewType, { icon: React.ElementType; title: string; description: string }> = {
+  kanban: { icon: () => null, title: "", description: "" },
   agents: { icon: Terminal, title: "Agent Terminals", description: "Monitor and interact with running AI agents in real-time." },
+  preview: { icon: Eye, title: "Preview", description: "Live preview of your running development server." },
   insights: { icon: Sparkles, title: "Insights", description: "AI-powered analytics and project intelligence." },
   roadmap: { icon: Map, title: "Roadmap", description: "Plan and visualize your project milestones and timeline." },
   ideation: { icon: Lightbulb, title: "Ideation", description: "Brainstorm and capture ideas for your project." },
@@ -53,16 +60,19 @@ const viewComponents: Record<NavigationView, { icon: React.ElementType; title: s
 }
 
 export default function MoltbotPage() {
-  // Project tabs state with sourceType info
-  const [tabs, setTabs] = useState<(ProjectTab & { sourceType?: string; path?: string })[]>([
+  // Projects state (previously "tabs")
+  const [projects, setProjects] = useState<ProjectData[]>([
     { id: "proj-1", name: "molten", color: "#ef4444", sourceType: "local", path: "/mnt/dev/repos/moltbot-dashboard" },
     { id: "proj-2", name: "moltencalc", color: "#f97316", sourceType: "local", path: "/mnt/dev/repos/moltencalc" },
     { id: "proj-3", name: "react", color: "#22c55e", sourceType: "github", path: "github.com/facebook/react" },
   ])
-  const [activeTabId, setActiveTabId] = useState<string | null>("proj-2") // Start on moltencalc for testing
+  const [activeProjectId, setActiveProjectId] = useState<string | null>("proj-1")
 
-  // Navigation state
-  const [activeView, setActiveView] = useState<NavigationView>("kanban")
+  // View tabs state - each project can have multiple view tabs
+  const [viewTabs, setViewTabs] = useState<ViewTab[]>([
+    { id: "view-kanban-1", type: "kanban", label: "Kanban Board" },
+  ])
+  const [activeViewTabId, setActiveViewTabId] = useState<string | null>("view-kanban-1")
 
   // App state
   const [loading, setLoading] = useState(true)
@@ -71,40 +81,27 @@ export default function MoltbotPage() {
   const [newProjectModalOpen, setNewProjectModalOpen] = useState(false)
 
   const { success, error: showError, info } = useToast()
+  const addTask = useTaskStore((state) => state.addTask)
 
   // Initialize
   useEffect(() => {
-    // Simulate initial loading
     const timer = setTimeout(() => {
       setLoading(false)
     }, 500)
     return () => clearTimeout(timer)
   }, [])
 
-  // Tab handlers
-  const handleSelectTab = useCallback((tabId: string) => {
-    setActiveTabId(tabId)
+  // Project handlers
+  const handleProjectChange = useCallback((projectId: string) => {
+    setActiveProjectId(projectId)
   }, [])
 
-  const handleCloseTab = useCallback((tabId: string) => {
-    setTabs((prev) => {
-      const newTabs = prev.filter((t) => t.id !== tabId)
-      // If closing active tab, select another
-      if (activeTabId === tabId && newTabs.length > 0) {
-        setActiveTabId(newTabs[0].id)
-      } else if (newTabs.length === 0) {
-        setActiveTabId(null)
-      }
-      return newTabs
-    })
-  }, [activeTabId])
-
-  const handleAddTab = useCallback(() => {
+  const handleNewProject = useCallback(() => {
     setNewProjectModalOpen(true)
   }, [])
 
-  const handleCreateProject = useCallback((project: ProjectData) => {
-    const newTab: ProjectTab & { sourceType?: string; path?: string } = {
+  const handleCreateProject = useCallback((project: CreateProjectData) => {
+    const newProject: ProjectData = {
       id: `proj-${Date.now()}`,
       name: project.name,
       color: project.color,
@@ -113,48 +110,109 @@ export default function MoltbotPage() {
         ? project.localPath
         : `github.com/${project.githubOwner}/${project.githubRepo}`,
     }
-    setTabs((prev) => [...prev, newTab])
-    setActiveTabId(newTab.id)
+    setProjects((prev) => [...prev, newProject])
+    setActiveProjectId(newProject.id)
     setNewProjectModalOpen(false)
-    success("Project created", `${project.name} has been added from ${project.sourceType === "local" ? project.localPath : `GitHub: ${project.githubOwner}/${project.githubRepo}`}`)
+    success("Project created", `${project.name} has been added`)
   }, [success])
 
-  // Navigation handler
-  const handleViewChange = useCallback((view: NavigationView) => {
-    setActiveView(view)
+  // View tab handlers
+  const handleSelectViewTab = useCallback((tabId: string) => {
+    setActiveViewTabId(tabId)
+  }, [])
+
+  const handleCloseViewTab = useCallback((tabId: string) => {
+    setViewTabs((prev) => {
+      const newTabs = prev.filter((t) => t.id !== tabId)
+      // If closing active tab, select another
+      if (activeViewTabId === tabId && newTabs.length > 0) {
+        setActiveViewTabId(newTabs[newTabs.length - 1].id)
+      } else if (newTabs.length === 0) {
+        // Always keep at least the kanban tab
+        const kanbanTab: ViewTab = { id: "view-kanban-default", type: "kanban", label: "Kanban Board" }
+        setActiveViewTabId(kanbanTab.id)
+        return [kanbanTab]
+      }
+      return newTabs
+    })
+  }, [activeViewTabId])
+
+  const handleAddViewTab = useCallback((type: ViewType) => {
+    const viewDef = VIEW_DEFINITIONS[type]
+    const newTab: ViewTab = {
+      id: `view-${type}-${Date.now()}`,
+      type,
+      label: viewDef?.label || type,
+    }
+    setViewTabs((prev) => [...prev, newTab])
+    setActiveViewTabId(newTab.id)
   }, [])
 
   // New task handler
   const handleNewTask = useCallback(() => {
-    if (activeView !== "kanban") {
-      setActiveView("kanban")
+    // Make sure kanban tab is open
+    const kanbanTab = viewTabs.find(t => t.type === "kanban")
+    if (kanbanTab) {
+      setActiveViewTabId(kanbanTab.id)
+    } else {
+      handleAddViewTab("kanban")
     }
     setCreateTaskModalOpen(true)
-  }, [activeView])
+  }, [viewTabs, handleAddViewTab])
 
-  // Get active project for context-aware views
-  const activeProject = tabs.find((t) => t.id === activeTabId)
+  // Create task handler
+  const handleCreateTask = useCallback((taskData: Partial<{ title: string; description: string; status: string; priority: string; projectId: string; labels: string[]; dueDate: string; subtasks: { id: string; title: string; completed: boolean }[]; progress: number }>) => {
+    const task = addTask({
+      title: taskData.title || "Untitled Task",
+      description: taskData.description || "",
+      status: (taskData.status as "backlog" | "todo" | "inProgress" | "review" | "done") || "todo",
+      priority: (taskData.priority as "low" | "medium" | "high" | "critical") || "medium",
+      projectId: taskData.projectId || activeProjectId || undefined,
+      labels: taskData.labels || [],
+      dueDate: taskData.dueDate,
+      subtasks: taskData.subtasks || [],
+      progress: taskData.progress ?? 0,
+    })
+    setCreateTaskModalOpen(false)
+    success("Task created", `"${task.title}" has been added`)
+  }, [addTask, activeProjectId, success])
+
+  // Get active project and view
+  const activeProject = projects.find((p) => p.id === activeProjectId)
+  const activeViewTab = viewTabs.find((t) => t.id === activeViewTabId)
+  const activeViewType = activeViewTab?.type || "kanban"
+
   const githubInfo = activeProject?.sourceType === "github"
     ? parseGitHubPath(activeProject.path)
     : null
 
-  // Render current view
+  // Render current view based on active tab type
   const renderView = () => {
-    if (activeView === "kanban") {
+    if (activeViewType === "kanban") {
       return (
         <KanbanBoard
-          projectId={activeTabId}
+          projectId={activeProjectId}
           projectName={activeProject?.name}
-          projects={tabs.map(t => ({ id: t.id, name: t.name }))}
+          projects={projects.map(p => ({ id: p.id, name: p.name }))}
         />
       )
     }
 
-    if (activeView === "infrastructure") {
+    if (activeViewType === "preview") {
+      return (
+        <PreviewView
+          projectId={activeProjectId}
+          projectName={activeProject?.name}
+          projectPath={activeProject?.path}
+        />
+      )
+    }
+
+    if (activeViewType === "infrastructure") {
       return <LiveInfrastructureView enableLiveData={true} />
     }
 
-    if (activeView === "github-issues") {
+    if (activeViewType === "github-issues") {
       return (
         <GitHubIssuesView
           owner={githubInfo?.owner}
@@ -162,38 +220,100 @@ export default function MoltbotPage() {
           projectId={activeProject?.id}
           onSyncToKanban={(tasks) => {
             info("Sync", `${tasks.length} issue(s) ready to sync to Kanban`)
-            // TODO: Integrate with KanbanBoard task state
           }}
         />
       )
     }
 
-    if (activeView === "mcp") {
+    if (activeViewType === "github-prs") {
+      return (
+        <GitHubPRsView
+          owner={githubInfo?.owner}
+          repo={githubInfo?.repo}
+          projectId={activeProject?.id}
+          onSyncToKanban={(tasks) => {
+            info("Sync", `${tasks.length} PR(s) ready to sync to Kanban`)
+          }}
+        />
+      )
+    }
+
+    if (activeViewType === "mcp") {
       return <MCPOverview />
     }
 
-    if (activeView === "agents") {
+    if (activeViewType === "agents") {
       return (
         <AgentsView
-          projectId={activeTabId}
+          projectId={activeProjectId}
           projectName={activeProject?.name}
-          projects={tabs.map(t => ({ id: t.id, name: t.name }))}
-          tasks={[]} // Tasks will be populated from Kanban state when integrated
+          projects={projects.map(p => ({ id: p.id, name: p.name }))}
+          tasks={[]}
         />
       )
     }
 
-    const viewConfig = viewComponents[activeView]
-    if (viewConfig && viewConfig.icon) {
+    if (activeViewType === "roadmap") {
       return (
-        <PlaceholderView
-          title={viewConfig.title}
-          icon={viewConfig.icon}
-          description={viewConfig.description}
+        <RoadmapView
+          projectId={activeProjectId}
+          projectName={activeProject?.name}
+          projects={projects.map(p => ({ id: p.id, name: p.name }))}
         />
       )
     }
 
+    if (activeViewType === "ideation") {
+      return (
+        <IdeationView
+          projectId={activeProjectId}
+          projectName={activeProject?.name}
+          projects={projects.map(p => ({ id: p.id, name: p.name }))}
+        />
+      )
+    }
+
+    if (activeViewType === "context") {
+      return (
+        <ContextView
+          projectId={activeProjectId}
+          projectName={activeProject?.name}
+          projects={projects.map(p => ({ id: p.id, name: p.name }))}
+        />
+      )
+    }
+
+    if (activeViewType === "insights") {
+      return (
+        <InsightsView
+          projectId={activeProjectId}
+          projectName={activeProject?.name}
+          projects={projects.map(p => ({ id: p.id, name: p.name }))}
+        />
+      )
+    }
+
+    if (activeViewType === "changelog") {
+      return (
+        <ChangelogView
+          projectId={activeProjectId}
+          projectName={activeProject?.name}
+          projects={projects.map(p => ({ id: p.id, name: p.name }))}
+        />
+      )
+    }
+
+    if (activeViewType === "worktrees") {
+      return (
+        <WorktreesView
+          projectId={activeProjectId}
+          projectName={activeProject?.name}
+          projects={projects.map(p => ({ id: p.id, name: p.name, path: p.path }))}
+        />
+      )
+    }
+
+    // All views are now implemented - return null for safety
     return null
   }
 
@@ -235,13 +355,15 @@ export default function MoltbotPage() {
   return (
     <>
       <AppLayout
-        tabs={tabs}
-        activeTabId={activeTabId}
-        onSelectTab={handleSelectTab}
-        onCloseTab={handleCloseTab}
-        onAddTab={handleAddTab}
-        activeView={activeView}
-        onViewChange={handleViewChange}
+        projects={projects}
+        activeProjectId={activeProjectId}
+        onProjectChange={handleProjectChange}
+        onNewProject={handleNewProject}
+        viewTabs={viewTabs}
+        activeViewTabId={activeViewTabId}
+        onSelectViewTab={handleSelectViewTab}
+        onCloseViewTab={handleCloseViewTab}
+        onAddViewTab={handleAddViewTab}
         onNewTask={handleNewTask}
         hasUpdate={false}
         version="1.2.0"
@@ -249,11 +371,20 @@ export default function MoltbotPage() {
         {renderView()}
       </AppLayout>
 
-      {/* New Project Modal - requires GitHub/Directory selection */}
+      {/* New Project Modal */}
       <ProjectCreateModal
         open={newProjectModalOpen}
         onClose={() => setNewProjectModalOpen(false)}
         onSubmit={handleCreateProject}
+      />
+
+      {/* New Task Modal */}
+      <TaskCreateModal
+        open={createTaskModalOpen}
+        onClose={() => setCreateTaskModalOpen(false)}
+        onSubmit={handleCreateTask}
+        projects={projects.map(p => ({ id: p.id, name: p.name }))}
+        defaultStatus="planning"
       />
     </>
   )

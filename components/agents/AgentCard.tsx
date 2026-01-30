@@ -75,6 +75,14 @@ const typeColors: Record<AgentType, string> = {
   custom: "bg-theme-500/20 text-theme-400",
 }
 
+// Default fallback for unknown statuses
+const defaultStatus = {
+  bg: "bg-theme-500/20",
+  text: "text-theme-400",
+  dot: "bg-theme-400",
+  label: "Unknown",
+}
+
 export function AgentCard({
   agent,
   onClick,
@@ -82,7 +90,7 @@ export function AgentCard({
   onStop,
   onViewLogs,
 }: AgentCardProps) {
-  const status = statusConfig[agent.status]
+  const status = statusConfig[agent.status] || defaultStatus
   const tokenPercent = Math.round((agent.tokensUsed / agent.maxTokens) * 100)
 
   return (

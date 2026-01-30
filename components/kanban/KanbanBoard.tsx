@@ -22,6 +22,15 @@ import { TaskDetailModal } from "./TaskDetailModal"
 import { AgentSelectModal } from "../agents/AgentSelectModal"
 import { useMoltBot } from "@/hooks/useMoltBot"
 import { useToast } from "@/components/common/Toast"
+import { useTaskStore } from "@/lib/stores/task-store"
+import { useLogStore } from "@/lib/stores/log-store"
+import {
+  startTaskMonitoring,
+  stopTaskMonitoring,
+  updateTaskMonitoringProgress,
+  markTaskComplete,
+  logTaskEvent,
+} from "@/lib/agents/task-manager"
 import type { MoltBotMessage } from "@/lib/api/moltbot"
 
 interface Project {
@@ -51,288 +60,36 @@ const columns: ColumnConfig[] = [
 
 const priorityOrder = { urgent: 0, high: 1, medium: 2, low: 3 }
 
-// Demo tasks organized by project ID
-const demoTasksByProject: Record<string, Task[]> = {
-  // MoltBot Dashboard (proj-1) - Dashboard infrastructure tasks
-  "proj-1": [
-    {
-      id: "molten-1",
-      title: "Setup WebSocket connection",
-      description: "Implement WebSocket client for real-time agent communication",
-      status: "done",
-      priority: "high",
-      projectId: "proj-1",
-      projectName: "molten",
-      labels: ["infrastructure", "websocket"],
-      progress: 100,
-      subtasks: [
-        { id: "mst-1", title: "Create WebSocket hook", completed: true },
-        { id: "mst-2", title: "Handle reconnection logic", completed: true },
-        { id: "mst-3", title: "Add message queue", completed: true },
-      ],
-      createdAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
-      updatedAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "molten-2",
-      title: "Implement Kanban board",
-      description: "Create drag-and-drop Kanban board component with DnD Kit",
-      status: "in_progress",
-      priority: "high",
-      projectId: "proj-1",
-      projectName: "molten",
-      labels: ["ui", "feature"],
-      assignedAgent: "coder",
-      progress: 75,
-      subtasks: [
-        { id: "mst-4", title: "Setup DnD Kit", completed: true },
-        { id: "mst-5", title: "Create column components", completed: true },
-        { id: "mst-6", title: "Create task cards", completed: true },
-        { id: "mst-7", title: "Add project scoping", completed: false },
-      ],
-      createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-      updatedAt: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "molten-3",
-      title: "Add toast notifications",
-      description: "Implement toast notification system for user feedback",
-      status: "review",
-      priority: "medium",
-      projectId: "proj-1",
-      projectName: "molten",
-      labels: ["ui", "ux"],
-      assignedAgent: "tester",
-      progress: 90,
-      subtasks: [
-        { id: "mst-8", title: "Create Toast component", completed: true },
-        { id: "mst-9", title: "Add toast context", completed: true },
-        { id: "mst-10", title: "Style variants", completed: true },
-        { id: "mst-11", title: "Test accessibility", completed: false },
-      ],
-      createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-      updatedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "molten-4",
-      title: "Configure MCP integration",
-      description: "Setup Model Context Protocol for agent tool access",
-      status: "planning",
-      priority: "high",
-      projectId: "proj-1",
-      projectName: "molten",
-      labels: ["backend", "mcp"],
-      progress: 0,
-      subtasks: [],
-      createdAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-      updatedAt: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
-    },
-  ],
-  // MoltenCalc (proj-2) - Calculator project tasks
-  "proj-2": [
-    {
-      id: "calc-1",
-      title: "Setup React project structure",
-      description: "Initialize React with TypeScript, configure build tools, and setup project structure for the calculator app",
-      status: "done",
-      priority: "high",
-      projectId: "proj-2",
-      projectName: "moltencalc",
-      labels: ["setup", "frontend"],
-      progress: 100,
-      subtasks: [
-        { id: "st-1", title: "Create React app with TypeScript", completed: true },
-        { id: "st-2", title: "Setup Tailwind CSS", completed: true },
-        { id: "st-3", title: "Configure ESLint/Prettier", completed: true },
-      ],
-      createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-      updatedAt: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "calc-2",
-      title: "Implement basic calculator UI",
-      description: "Create the main calculator interface with number pad, operators, and display",
-      status: "in_progress",
-      priority: "high",
-      projectId: "proj-2",
-      projectName: "moltencalc",
-      labels: ["ui", "frontend"],
-      assignedAgent: "coder",
-      progress: 45,
-      subtasks: [
-        { id: "st-4", title: "Design calculator layout", completed: true },
-        { id: "st-5", title: "Create number buttons", completed: true },
-        { id: "st-6", title: "Create operator buttons", completed: false },
-        { id: "st-7", title: "Implement display component", completed: false },
-      ],
-      createdAt: new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString(),
-      updatedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "calc-3",
-      title: "Implement arithmetic operations",
-      description: "Add core calculation logic for addition, subtraction, multiplication, and division",
-      status: "planning",
-      priority: "high",
-      projectId: "proj-2",
-      projectName: "moltencalc",
-      labels: ["logic", "core"],
-      progress: 0,
-      subtasks: [
-        { id: "st-8", title: "Addition operation", completed: false },
-        { id: "st-9", title: "Subtraction operation", completed: false },
-        { id: "st-10", title: "Multiplication operation", completed: false },
-        { id: "st-11", title: "Division operation", completed: false },
-        { id: "st-12", title: "Handle division by zero", completed: false },
-      ],
-      createdAt: new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString(),
-      updatedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "calc-4",
-      title: "Add memory functions",
-      description: "Implement memory operations: M+, M-, MR (Memory Recall), and MC (Memory Clear)",
-      status: "planning",
-      priority: "medium",
-      projectId: "proj-2",
-      projectName: "moltencalc",
-      labels: ["feature", "memory"],
-      progress: 0,
-      subtasks: [
-        { id: "st-13", title: "Memory Add (M+)", completed: false },
-        { id: "st-14", title: "Memory Subtract (M-)", completed: false },
-        { id: "st-15", title: "Memory Recall (MR)", completed: false },
-        { id: "st-16", title: "Memory Clear (MC)", completed: false },
-      ],
-      createdAt: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
-      updatedAt: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "calc-5",
-      title: "Add keyboard support",
-      description: "Enable keyboard input for numbers and operations, including Enter for equals",
-      status: "planning",
-      priority: "medium",
-      projectId: "proj-2",
-      projectName: "moltencalc",
-      labels: ["accessibility", "ux"],
-      progress: 0,
-      subtasks: [],
-      createdAt: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
-      updatedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "calc-6",
-      title: "Implement calculation history",
-      description: "Add a panel showing recent calculations with ability to reuse results",
-      status: "planning",
-      priority: "low",
-      projectId: "proj-2",
-      projectName: "moltencalc",
-      labels: ["feature", "ux"],
-      progress: 0,
-      subtasks: [
-        { id: "st-17", title: "Create history data structure", completed: false },
-        { id: "st-18", title: "Build history UI panel", completed: false },
-        { id: "st-19", title: "Add click-to-reuse functionality", completed: false },
-      ],
-      createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-      updatedAt: new Date(Date.now() - 15 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "calc-7",
-      title: "Fix display overflow bug",
-      description: "Long numbers are overflowing the display area, need to implement text truncation or scientific notation",
-      status: "error",
-      priority: "urgent",
-      projectId: "proj-2",
-      projectName: "moltencalc",
-      labels: ["bug", "ui"],
-      progress: 20,
-      subtasks: [
-        { id: "st-20", title: "Identify overflow scenarios", completed: true },
-        { id: "st-21", title: "Implement scientific notation", completed: false },
-      ],
-      createdAt: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(),
-      updatedAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "calc-8",
-      title: "Write unit tests for calculations",
-      description: "Comprehensive test suite for all arithmetic operations and edge cases",
-      status: "review",
-      priority: "high",
-      projectId: "proj-2",
-      projectName: "moltencalc",
-      labels: ["testing", "quality"],
-      assignedAgent: "tester",
-      progress: 85,
-      subtasks: [
-        { id: "st-22", title: "Basic operation tests", completed: true },
-        { id: "st-23", title: "Edge case tests", completed: true },
-        { id: "st-24", title: "Memory function tests", completed: true },
-        { id: "st-25", title: "Integration tests", completed: false },
-      ],
-      createdAt: new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString(),
-      updatedAt: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
-    },
-  ],
-  // React (proj-3) - GitHub project example tasks
-  "proj-3": [
-    {
-      id: "react-1",
-      title: "Review React 19 concurrent features",
-      description: "Study and document the new concurrent rendering features in React 19",
-      status: "in_progress",
-      priority: "high",
-      projectId: "proj-3",
-      projectName: "react",
-      labels: ["research", "documentation"],
-      assignedAgent: "researcher",
-      progress: 60,
-      subtasks: [
-        { id: "rst-1", title: "Read React 19 RFC", completed: true },
-        { id: "rst-2", title: "Test Suspense improvements", completed: true },
-        { id: "rst-3", title: "Document use() hook", completed: false },
-        { id: "rst-4", title: "Write migration guide", completed: false },
-      ],
-      createdAt: new Date(Date.now() - 4 * 24 * 60 * 60 * 1000).toISOString(),
-      updatedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "react-2",
-      title: "Analyze Server Components patterns",
-      description: "Document best practices for React Server Components usage",
-      status: "planning",
-      priority: "medium",
-      projectId: "proj-3",
-      projectName: "react",
-      labels: ["research", "server-components"],
-      progress: 0,
-      subtasks: [],
-      createdAt: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString(),
-      updatedAt: new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString(),
-    },
-    {
-      id: "react-3",
-      title: "Track open issues for hooks",
-      description: "Monitor and categorize open GitHub issues related to React hooks",
-      status: "done",
-      priority: "low",
-      projectId: "proj-3",
-      projectName: "react",
-      labels: ["tracking", "hooks"],
-      progress: 100,
-      subtasks: [
-        { id: "rst-5", title: "useState issues", completed: true },
-        { id: "rst-6", title: "useEffect issues", completed: true },
-        { id: "rst-7", title: "Custom hooks issues", completed: true },
-      ],
-      createdAt: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-      updatedAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-    },
-  ],
+// Status mapping from task-store to kanban columns
+const statusToColumn: Record<string, Task["status"]> = {
+  backlog: "planning",
+  todo: "planning",
+  inProgress: "in_progress",
+  review: "review",
+  done: "done",
 }
+
+const columnToStatus: Record<string, string> = {
+  error: "backlog",
+  planning: "todo",
+  backlog: "backlog",
+  todo: "todo",
+  in_progress: "inProgress",
+  review: "review",
+  done: "done",
+}
+
+// Priority mapping
+const priorityMap: Record<string, Task["priority"]> = {
+  critical: "urgent",
+  urgent: "urgent",
+  high: "high",
+  medium: "medium",
+  low: "low",
+}
+
+// NOTE: Demo tasks removed - now using task-store with localStorage persistence
+// Tasks are created via the UI and persist across sessions
 
 // Format relative time
 function formatRelativeTime(dateString: string): string {
@@ -550,28 +307,37 @@ export function KanbanBoard({
   onTaskDelete,
   onRefresh,
 }: KanbanBoardProps) {
-  // Store all tasks by project ID - merge initial tasks with demo tasks
-  const [tasksByProject, setTasksByProject] = useState<Record<string, Task[]>>(() => {
-    // Start with demo tasks, then overlay any initialTasksByProject
-    const merged = { ...demoTasksByProject }
-    Object.entries(initialTasksByProject).forEach(([pid, tasks]) => {
-      merged[pid] = tasks
-    })
-    return merged
-  })
+  // Use persistent task store instead of local state with demo data
+  const storeTasks = useTaskStore((state) => state.tasks)
+  const storeAddTask = useTaskStore((state) => state.addTask)
+  const storeUpdateTask = useTaskStore((state) => state.updateTask)
+  const storeDeleteTask = useTaskStore((state) => state.deleteTask)
+  const storeMoveTask = useTaskStore((state) => state.moveTask)
+  const assignAgentToTask = useTaskStore((state) => state.assignAgentToTask)
+  const updateTaskProgress = useTaskStore((state) => state.updateTaskProgress)
+  const completeAgentTask = useTaskStore((state) => state.completeAgentTask)
+  const failAgentTask = useTaskStore((state) => state.failAgentTask)
+  const findTaskByRunId = useTaskStore((state) => state.findTaskByRunId)
 
-  // Get tasks for the current project
-  const tasks = projectId ? (tasksByProject[projectId] || []) : []
+  // Map store tasks to kanban format and filter by project
+  const tasks = useMemo(() => {
+    return storeTasks
+      .filter((t) => !projectId || t.projectId === projectId || !t.projectId)
+      .map((t) => ({
+        ...t,
+        // Map store status to kanban status
+        status: (statusToColumn[t.status] || t.status) as Task["status"],
+        // Map store priority to kanban priority
+        priority: (priorityMap[t.priority] || t.priority) as Task["priority"],
+        description: t.description || "",
+      }))
+  }, [storeTasks, projectId])
 
-  // Helper to update tasks for a specific project
+  // Helper to update tasks - now uses store
   const setTasks = useCallback((updater: Task[] | ((prev: Task[]) => Task[])) => {
-    if (!projectId) return
-    setTasksByProject((prev) => {
-      const currentTasks = prev[projectId] || []
-      const newTasks = typeof updater === "function" ? updater(currentTasks) : updater
-      return { ...prev, [projectId]: newTasks }
-    })
-  }, [projectId])
+    // This is for compatibility - ideally use store actions directly
+    console.warn("setTasks called - use store actions instead")
+  }, [])
   const [activeTask, setActiveTask] = useState<Task | null>(null)
   const [selectedTask, setSelectedTask] = useState<Task | null>(null)
   const [editingTask, setEditingTask] = useState<Task | null>(null)
@@ -583,76 +349,111 @@ export function KanbanBoard({
 
   const { success, error: showError, info } = useToast()
 
-  // Helper function to update a task across all projects
-  const updateTaskInAllProjects = useCallback((
-    taskId: string,
-    updater: (task: Task) => Task
-  ) => {
-    setTasksByProject((prev) => {
-      const updated = { ...prev }
-      Object.keys(updated).forEach((pid) => {
-        updated[pid] = updated[pid].map((t) =>
-          t.id === taskId ? updater(t) : t
-        )
-      })
-      return updated
-    })
-  }, [])
+  // Get log store for activity logging
+  const addLog = useLogStore((state) => state.addLog)
 
-  // MoltBot integration for live agent execution
+  // Helper to find task by various IDs
+  const findTask = useCallback((
+    taskId?: string,
+    runId?: string,
+    agentId?: string
+  ) => {
+    if (taskId) return storeTasks.find(t => t.id === taskId)
+    if (runId) return findTaskByRunId(runId)
+    if (agentId) {
+      const entry = Object.entries(activeAgents).find(([, aId]) => aId === agentId)
+      if (entry) return storeTasks.find(t => t.id === entry[0])
+    }
+    return undefined
+  }, [storeTasks, findTaskByRunId, activeAgents])
+
+  // MoltBot integration for live agent execution - uses task store directly
   const moltbot = useMoltBot({
     autoConnect: true,
     onMessage: useCallback((message: MoltBotMessage) => {
-      // Handle real-time agent updates
+      // Handle real-time agent updates via task store
       if (message.type === 'agent_progress' && message.data) {
-        const { agentId, progress, taskId } = message.data as { agentId: string; progress: number; taskId?: string }
-        // Update task progress if we know which task this agent is working on
-        const taskIdFromAgent = taskId || Object.entries(activeAgents).find(([, aId]) => aId === agentId)?.[0]
-        if (taskIdFromAgent) {
-          updateTaskInAllProjects(taskIdFromAgent, (t) => ({
-            ...t,
-            progress,
-            updatedAt: new Date().toISOString()
-          }))
+        const { progress, taskId, runId } = message.data as { agentId: string; progress: number; taskId?: string; runId?: string }
+        const task = findTask(taskId, runId, message.agentId)
+        if (task) {
+          updateTaskProgress(task.id, progress)
+          updateTaskMonitoringProgress(task.id)
+
+          // Log progress milestones
+          if (progress === 25 || progress === 50 || progress === 75 || progress === 100) {
+            addLog('info', `Task "${task.title}" progress: ${progress}%`, {
+              taskId: task.id,
+              agentId: message.agentId,
+              runId,
+              source: 'KanbanBoard',
+              metadata: { progress },
+            })
+          }
+
+          // Auto-complete at 100%
+          if (progress >= 100) {
+            markTaskComplete(task.id, { reason: 'Agent reported 100% progress' })
+            setActiveAgents((prev) => {
+              const next = { ...prev }
+              delete next[task.id]
+              return next
+            })
+            success('Task completed', `"${task.title}" moved to Review`)
+          }
         }
       } else if (message.type === 'agent_completed' && message.data) {
-        const { agentId, taskId } = message.data as { agentId: string; taskId?: string }
-        const taskIdFromAgent = taskId || Object.entries(activeAgents).find(([, aId]) => aId === agentId)?.[0]
-        if (taskIdFromAgent) {
-          updateTaskInAllProjects(taskIdFromAgent, (t) => ({
-            ...t,
-            status: 'review' as Task['status'],
-            progress: 100,
-            updatedAt: new Date().toISOString()
-          }))
+        const { taskId, runId } = message.data as { agentId: string; taskId?: string; runId?: string }
+        const task = findTask(taskId, runId, message.agentId)
+        if (task) {
+          markTaskComplete(task.id, { reason: 'Agent completed signal received' })
           setActiveAgents((prev) => {
             const next = { ...prev }
-            delete next[taskIdFromAgent]
+            delete next[task.id]
             return next
           })
-          success('Agent completed', `Task moved to AI Review`)
+          success('Agent completed', `Task "${task.title}" moved to Review`)
         }
       } else if (message.type === 'agent_error' && message.data) {
-        const { agentId, error, taskId } = message.data as { agentId: string; error: string; taskId?: string }
-        const taskIdFromAgent = taskId || Object.entries(activeAgents).find(([, aId]) => aId === agentId)?.[0]
-        if (taskIdFromAgent) {
-          updateTaskInAllProjects(taskIdFromAgent, (t) => ({
-            ...t,
-            status: 'error' as Task['status'],
-            updatedAt: new Date().toISOString()
-          }))
+        const { error, taskId, runId } = message.data as { agentId: string; error: string; taskId?: string; runId?: string }
+        const task = findTask(taskId, runId, message.agentId)
+        if (task) {
+          failAgentTask(task.id)
+          stopTaskMonitoring(task.id)
           setActiveAgents((prev) => {
             const next = { ...prev }
-            delete next[taskIdFromAgent]
+            delete next[task.id]
             return next
+          })
+          addLog('error', `Task "${task.title}" failed: ${error}`, {
+            taskId: task.id,
+            agentId: message.agentId,
+            runId,
+            source: 'KanbanBoard',
+            metadata: { error },
           })
           showError('Agent error', error || 'Unknown error occurred')
         }
+      } else if (message.type === 'agent_log' && message.data) {
+        // Log agent output to activity log
+        const { log, taskId, runId } = message.data as { log: string; taskId?: string; runId?: string }
+        const task = findTask(taskId, runId, message.agentId)
+        if (task) {
+          addLog('debug', log, {
+            taskId: task.id,
+            agentId: message.agentId,
+            runId,
+            source: 'AgentOutput',
+          })
+        }
       }
-    }, [activeAgents, success, showError, updateTaskInAllProjects]),
+    }, [findTask, success, showError, addLog, updateTaskProgress, failAgentTask]),
     onError: useCallback((err: Error) => {
       console.error('MoltBot connection error:', err)
-    }, []),
+      addLog('error', `MoltBot connection error: ${err.message}`, {
+        source: 'KanbanBoard',
+        metadata: { error: err.message },
+      })
+    }, [addLog]),
   })
 
   // DnD sensors
@@ -699,13 +500,9 @@ export function KanbanBoard({
     // Check if dropped on a column
     const targetColumn = columns.find((c) => c.id === overId)
     if (targetColumn) {
-      setTasks((prev) =>
-        prev.map((t) =>
-          t.id === taskId
-            ? { ...t, status: targetColumn.id as Task["status"], updatedAt: new Date().toISOString() }
-            : t
-        )
-      )
+      // Map kanban column to store status
+      const newStatus = columnToStatus[targetColumn.id as Task["status"]] || targetColumn.id
+      storeMoveTask(taskId, newStatus as any)
 
       const updatedTask = tasks.find((t) => t.id === taskId)
       if (updatedTask && onTaskUpdate) {
@@ -719,14 +516,9 @@ export function KanbanBoard({
     if (overTask) {
       const activeTaskData = tasks.find((t) => t.id === taskId)
       if (activeTaskData && activeTaskData.status !== overTask.status) {
-        // Move to new column
-        setTasks((prev) =>
-          prev.map((t) =>
-            t.id === taskId
-              ? { ...t, status: overTask.status, updatedAt: new Date().toISOString() }
-              : t
-          )
-        )
+        // Move to new column - map to store status
+        const newStatus = columnToStatus[overTask.status] || overTask.status
+        storeMoveTask(taskId, newStatus as any)
 
         if (onTaskUpdate) {
           onTaskUpdate({ ...activeTaskData, status: overTask.status })
@@ -750,50 +542,26 @@ export function KanbanBoard({
     const selectedAgent = agentId === "auto" ? "orchestrator" : agentId
 
     // Update UI immediately for responsiveness
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === agentSelectTask.id
-          ? {
-              ...t,
-              status: "in_progress" as Task["status"],
-              assignedAgent: selectedAgent,
-              progress: 0,
-              updatedAt: new Date().toISOString()
-            }
-          : t
-      )
-    )
-
-    // Spawn agent via MoltBot API
+    // Spawn task via MoltBot API (OpenClaw compliant)
     try {
-      const response = await moltbot.spawnAgent({
-        taskId: agentSelectTask.id,
-        agentType: selectedAgent,
-        projectId: agentSelectTask.projectId,
-        config: {
-          title: agentSelectTask.title,
-          description: agentSelectTask.description,
-          labels: agentSelectTask.labels,
-        }
+      const response = await moltbot.spawnTask({
+        taskTitle: agentSelectTask.title,
+        taskDescription: agentSelectTask.description || agentSelectTask.title,
+        sessionId: agentSelectTask.projectId || 'default',
+        labels: agentSelectTask.labels,
       })
 
-      // Track the agent for this task
-      if (response.agentId) {
-        setActiveAgents((prev) => ({ ...prev, [agentSelectTask.id]: response.agentId }))
-        info('Agent spawned', `${selectedAgent} is working on "${agentSelectTask.title}"`)
+      // Track the run for this task using actual runId from MoltBot
+      if (response.runId) {
+        // Use store to assign agent - this persists the change
+        assignAgentToTask(agentSelectTask.id, response.runId, selectedAgent)
+        setActiveAgents((prev) => ({ ...prev, [agentSelectTask.id]: response.runId }))
+        info('Task started', `Agent is working on "${agentSelectTask.title}"`)
       }
 
       onTaskUpdate?.({ ...agentSelectTask, status: "in_progress", assignedAgent: selectedAgent })
     } catch (err) {
-      // Revert on failure
       console.error('Failed to spawn agent:', err)
-      setTasks((prev) =>
-        prev.map((t) =>
-          t.id === agentSelectTask.id
-            ? { ...t, status: agentSelectTask.status, assignedAgent: undefined, updatedAt: new Date().toISOString() }
-            : t
-        )
-      )
       showError('Failed to start agent', err instanceof Error ? err.message : 'Connection error')
     }
 
@@ -801,26 +569,13 @@ export function KanbanBoard({
   }
 
   const handlePauseTask = async (task: Task) => {
-    const agentId = activeAgents[task.id]
+    // Update via store - move back to planning/todo
+    storeMoveTask(task.id, 'todo')
 
-    // Update UI immediately
-    setTasks((prev) =>
-      prev.map((t) =>
-        t.id === task.id
-          ? { ...t, status: "planning" as Task["status"], updatedAt: new Date().toISOString() }
-          : t
-      )
-    )
-
-    // Pause agent if one is running
-    if (agentId) {
-      try {
-        await moltbot.pauseAgent(agentId)
-        info('Agent paused', `Task "${task.title}" has been paused`)
-      } catch (err) {
-        console.error('Failed to pause agent:', err)
-        // Still allow the UI update even if pause fails
-      }
+    // Note: OpenClaw doesn't have pause/resume - tasks run to completion
+    // The UI reflects the paused state but the agent run continues
+    if (activeAgents[task.id]) {
+      info('Task paused', `Task "${task.title}" marked as paused (agent run continues)`)
     }
 
     onTaskUpdate?.({ ...task, status: "planning" })
@@ -832,37 +587,30 @@ export function KanbanBoard({
   }
 
   const handleCreateTask = (taskData: Partial<Task>) => {
-    // Use the current project context if not explicitly set
-    const taskProjectId = taskData.projectId || projectId
-    const taskProjectName = taskData.projectName || projectName || projects.find(p => p.id === taskProjectId)?.name
+    // Use the current project context if not explicitly set, fall back to first project or "default"
+    const fallbackProjectId = projects[0]?.id || "default"
+    const taskProjectId = taskData.projectId || projectId || fallbackProjectId
+    const taskProjectName = taskData.projectName || projectName || projects.find(p => p.id === taskProjectId)?.name || "Default"
 
-    const newTask: Task = {
-      id: `task-${Date.now()}`,
+    // Map kanban status to store status
+    const storeStatus = columnToStatus[taskData.status || "planning"] || "todo"
+
+    // Use store to create task (persists to localStorage)
+    const newTask = storeAddTask({
       title: taskData.title || "Untitled Task",
-      description: taskData.description,
-      status: taskData.status || "planning",
-      priority: taskData.priority || "medium",
-      projectId: taskProjectId || undefined,
+      description: taskData.description || "",
+      status: storeStatus as any,
+      priority: (taskData.priority || "medium") as any,
+      projectId: taskProjectId,
       projectName: taskProjectName,
       labels: taskData.labels || [],
       dueDate: taskData.dueDate,
       assignedAgent: taskData.assignedAgent,
       progress: 0,
       subtasks: [],
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }
+    })
 
-    // Add task to the appropriate project's task list
-    const targetProjectId = taskProjectId || projectId || undefined
-    if (targetProjectId) {
-      setTasksByProject((prev) => ({
-        ...prev,
-        [targetProjectId]: [...(prev[targetProjectId] || []), newTask],
-      }))
-    }
-
-    onTaskCreate?.(newTask)
+    onTaskCreate?.(newTask as any)
     setShowCreateModal(false)
     setEditingTask(null)
   }
@@ -876,18 +624,16 @@ export function KanbanBoard({
   const handleUpdateTask = (taskData: Partial<Task>) => {
     if (!taskData.id) return
 
-    // Update the task in whichever project contains it
-    setTasksByProject((prev) => {
-      const updated = { ...prev }
-      Object.keys(updated).forEach((pid) => {
-        updated[pid] = updated[pid].map((t) =>
-          t.id === taskData.id
-            ? { ...t, ...taskData, updatedAt: new Date().toISOString() }
-            : t
-        )
-      })
-      return updated
-    })
+    // Map status if provided
+    const updates: any = { ...taskData }
+    if (taskData.status) {
+      updates.status = columnToStatus[taskData.status] || taskData.status
+    }
+    delete updates.id
+    delete updates.createdAt
+
+    // Use store to update task (persists to localStorage)
+    storeUpdateTask(taskData.id, updates)
 
     onTaskUpdate?.(taskData)
     setShowCreateModal(false)
@@ -895,36 +641,20 @@ export function KanbanBoard({
   }
 
   const handleDeleteTask = (taskId: string) => {
-    // Find which project this task belongs to and remove it
-    setTasksByProject((prev) => {
-      const updated = { ...prev }
-      Object.keys(updated).forEach((pid) => {
-        updated[pid] = updated[pid].filter((t) => t.id !== taskId)
-      })
-      return updated
-    })
+    // Use store to delete task (persists to localStorage)
+    storeDeleteTask(taskId)
     onTaskDelete?.(taskId)
   }
 
   const handleUpdateSubtasks = (taskId: string, subtasks: Task["subtasks"]) => {
-    let foundTask: Task | undefined
+    const task = storeTasks.find(t => t.id === taskId)
+    if (!task) return
 
-    setTasksByProject((prev) => {
-      const updated = { ...prev }
-      Object.keys(updated).forEach((pid) => {
-        updated[pid] = updated[pid].map((t) => {
-          if (t.id === taskId) {
-            foundTask = t
-            return { ...t, subtasks, updatedAt: new Date().toISOString() }
-          }
-          return t
-        })
-      })
-      return updated
-    })
+    // Use store to update subtasks
+    storeUpdateTask(taskId, { subtasks })
 
-    if (foundTask && onTaskUpdate) {
-      onTaskUpdate({ ...foundTask, subtasks })
+    if (onTaskUpdate) {
+      onTaskUpdate({ ...task, subtasks } as any)
     }
   }
 

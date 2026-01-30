@@ -22,7 +22,10 @@ export interface Task {
   status: TaskStatus;
   priority: TaskPriority;
   projectId?: string;
+  projectName?: string;
   assignedAgent?: string;
+  agentRunId?: string;  // MoltBot run ID for live tracking
+  progress: number;
   createdAt: string;
   updatedAt: string;
   dueDate?: string;
@@ -67,6 +70,16 @@ interface TaskState {
   setFilters: (filters: TaskFilters) => void;
   clearFilters: () => void;
 
+  // Agent integration actions
+  assignAgentToTask: (taskId: string, agentRunId: string, agentType?: string) => void;
+  updateTaskProgress: (taskId: string, progress: number) => void;
+  completeAgentTask: (taskId: string) => void;
+  failAgentTask: (taskId: string, error?: string) => void;
+  findTaskByRunId: (runId: string) => Task | undefined;
+
+  // Bulk actions
+  clearAllTasks: () => void;
+
   // Getters
   getTaskById: (id: string) => Task | undefined;
   getTasksByStatus: (status: TaskStatus) => Task[];
@@ -99,6 +112,7 @@ export const useTaskStore = create<TaskState>()(
         const newTask: Task = {
           ...taskData,
           id: generateId(),
+          progress: taskData.progress ?? 0,
           createdAt: getTimestamp(),
           updatedAt: getTimestamp(),
         };
@@ -296,6 +310,80 @@ export const useTaskStore = create<TaskState>()(
       // Clear all filters
       clearFilters: () => {
         set({ filters: {} });
+      },
+
+      // =========================================================================
+      // Agent Integration - Live Updates from MoltBot
+      // =========================================================================
+
+      // Assign an agent to a task (starts execution)
+      assignAgentToTask: (taskId, agentRunId, agentType) => {
+        set((state) => ({
+          tasks: state.tasks.map((task) =>
+            task.id === taskId
+              ? {
+                  ...task,
+                  status: 'inProgress' as TaskStatus,
+                  assignedAgent: agentType || task.assignedAgent,
+                  agentRunId,
+                  progress: 0,
+                  updatedAt: getTimestamp(),
+                }
+              : task
+          ),
+        }));
+      },
+
+      // Update task progress from agent
+      updateTaskProgress: (taskId, progress) => {
+        set((state) => ({
+          tasks: state.tasks.map((task) =>
+            task.id === taskId
+              ? { ...task, progress, updatedAt: getTimestamp() }
+              : task
+          ),
+        }));
+      },
+
+      // Mark task as complete (moves to review)
+      completeAgentTask: (taskId) => {
+        set((state) => ({
+          tasks: state.tasks.map((task) =>
+            task.id === taskId
+              ? {
+                  ...task,
+                  status: 'review' as TaskStatus,
+                  progress: 100,
+                  updatedAt: getTimestamp(),
+                }
+              : task
+          ),
+        }));
+      },
+
+      // Mark task as failed
+      failAgentTask: (taskId) => {
+        set((state) => ({
+          tasks: state.tasks.map((task) =>
+            task.id === taskId
+              ? {
+                  ...task,
+                  status: 'backlog' as TaskStatus, // Move back to backlog on failure
+                  updatedAt: getTimestamp(),
+                }
+              : task
+          ),
+        }));
+      },
+
+      // Find task by MoltBot run ID
+      findTaskByRunId: (runId) => {
+        return get().tasks.find((task) => task.agentRunId === runId);
+      },
+
+      // Clear all tasks
+      clearAllTasks: () => {
+        set({ tasks: [], filters: {} });
       },
 
       // Get task by ID

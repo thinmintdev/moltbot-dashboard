@@ -105,3 +105,16 @@ export {
   type LogLevel,
   type LogSubscriber,
 } from './log-store';
+
+// Safety Store
+export {
+  useSafetyStore,
+  usePendingOperations,
+  usePendingByRiskLevel,
+  useDangerousOperations,
+  useUnresolvedAlerts,
+  useCriticalAlerts,
+  useCorrelationGroups,
+  useCorrelationGroupById,
+  useSafetyStats,
+} from './safety-store';

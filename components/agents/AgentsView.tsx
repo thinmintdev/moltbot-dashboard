@@ -154,17 +154,12 @@ export function AgentsView({ projectId, projectName, projects = [], tasks = [] }
         config.projectId || projectId || undefined
       )
 
-      // Spawn via MoltBot API
+      // Spawn via MoltBot API (OpenClaw compliant)
       if (config.taskId) {
-        await moltbot.spawnAgent({
-          taskId: config.taskId,
-          agentType: config.type,
-          projectId: config.projectId || projectId || undefined,
-          config: {
-            name: config.name,
-            model: config.model,
-            skills: config.skills,
-          },
+        await moltbot.spawnTask({
+          taskTitle: config.name,
+          taskDescription: `Agent task: ${config.name}`,
+          sessionId: config.projectId || projectId || 'default',
         })
       }
 
@@ -174,38 +169,35 @@ export function AgentsView({ projectId, projectName, projects = [], tasks = [] }
     }
   }, [moltbot, spawnStoreAgent, projectId, success, showError])
 
-  // Pause agent handler
+  // Pause agent handler (UI only - OpenClaw runs to completion)
   const handlePauseAgent = useCallback(async (agentId: string) => {
     try {
       pauseStoreAgent(agentId)
-      await moltbot.pauseAgent(agentId)
-      info("Agent Paused", "Agent execution has been paused")
+      info("Agent Paused", "Agent marked as paused (run continues)")
     } catch (err) {
       showError("Pause Failed", err instanceof Error ? err.message : "Failed to pause agent")
     }
-  }, [moltbot, pauseStoreAgent, info, showError])
+  }, [pauseStoreAgent, info, showError])
 
-  // Resume agent handler
+  // Resume agent handler (UI only - OpenClaw runs to completion)
   const handleResumeAgent = useCallback(async (agentId: string) => {
     try {
       resumeStoreAgent(agentId)
-      await moltbot.resumeAgent(agentId)
-      info("Agent Resumed", "Agent execution has resumed")
+      info("Agent Resumed", "Agent marked as resumed")
     } catch (err) {
       showError("Resume Failed", err instanceof Error ? err.message : "Failed to resume agent")
     }
-  }, [moltbot, resumeStoreAgent, info, showError])
+  }, [resumeStoreAgent, info, showError])
 
-  // Stop agent handler
+  // Stop agent handler (UI only - future: implement via gateway abort)
   const handleStopAgent = useCallback(async (agentId: string) => {
     try {
       stopStoreAgent(agentId)
-      await moltbot.stopAgent(agentId)
-      info("Agent Stopped", "Agent has been stopped")
+      info("Agent Stopped", "Agent marked as stopped")
     } catch (err) {
       showError("Stop Failed", err instanceof Error ? err.message : "Failed to stop agent")
     }
-  }, [moltbot, stopStoreAgent, info, showError])
+  }, [stopStoreAgent, info, showError])
 
   // Refresh handler - sync with MoltBot
   const handleRefresh = useCallback(async () => {

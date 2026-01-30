@@ -1,71 +1,67 @@
-export type MoltBotMessageType =
-  | 'agent_spawned'
-  | 'agent_status'
-  | 'agent_log'
-  | 'agent_progress'
-  | 'agent_completed'
-  | 'agent_error'
-  | 'task_started'
-  | 'task_completed'
-  | 'task_failed'
-  | 'status_update';
+// OpenClaw-compliant MoltBot API client
+// Based on https://docs.openclaw.ai/concepts
 
-export interface MoltBotMessage {
-  type: MoltBotMessageType;
-  agentId: string;
-  taskId?: string;
-  timestamp: string;
-  data?: Record<string, unknown>;
-}
+// =============================================================================
+// Types aligned with OpenClaw concepts
+// =============================================================================
 
-export interface SpawnAgentRequest {
-  taskId: string;
-  agentType: string;
-  projectId?: string;
-  config?: Record<string, unknown>;
-}
-
-export interface SpawnAgentResponse {
-  agentId: string;
-  taskId: string;
-  status: string;
-  createdAt: string;
-}
-
-export interface AgentStatusResponse {
-  agentId: string;
-  status: 'idle' | 'running' | 'paused' | 'completed' | 'error';
-  progress: number;
-  currentStep?: string;
-  error?: string;
-  updatedAt: string;
-}
-
-export interface AgentLogEntry {
-  timestamp: string;
-  level: 'debug' | 'info' | 'warn' | 'error';
-  message: string;
-  metadata?: Record<string, unknown>;
-}
-
-export interface LogsStreamResponse {
-  agentId: string;
-  logs: AgentLogEntry[];
-  hasMore: boolean;
-}
-
-// MoltBot actual API types
-export interface MoltBotTask {
+// Agent: An isolated brain with workspace, identity, sessions
+export interface OpenClawAgent {
   id: string;
-  title: string;
-  description?: string;
-  status: 'todo' | 'inProgress' | 'done';
-  priority?: string;
-  labels?: string[];
-  createdAt?: string;
-  updatedAt?: string;
+  workspace: string;
+  agentDir: string;
+  model: string;
+  bindings: number;
+  isDefault: boolean;
+  routes: string[];
 }
 
+// Session: Conversation context within an agent
+export interface OpenClawSession {
+  key: string;          // Format: agent:<agentId>:<sessionKey>
+  kind: 'direct' | 'group';
+  updatedAt: number;
+  ageMs: number;
+  sessionId: string;
+  systemSent: boolean;
+  abortedLastRun: boolean;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  model: string;
+  contextTokens: number;
+}
+
+// Agent run response from moltbot agent command
+export interface AgentRunResponse {
+  runId: string;
+  status: 'ok' | 'error' | 'aborted';
+  summary: string;
+  result: {
+    payloads: Array<{
+      text: string;
+      mediaUrl: string | null;
+    }>;
+    meta: {
+      durationMs: number;
+      agentMeta: {
+        sessionId: string;
+        provider: string;
+        model: string;
+        usage: {
+          input: number;
+          output: number;
+          cacheRead: number;
+          cacheWrite: number;
+          total: number;
+        };
+      };
+      aborted: boolean;
+    };
+  };
+}
+
+// MoltBot status response
 export interface MoltBotStatusResponse {
   success: boolean;
   data: {
@@ -88,6 +84,31 @@ export interface MoltBotStatusResponse {
   };
 }
 
+// WebSocket message types
+export type MoltBotMessageType =
+  | 'agent_spawned'
+  | 'agent_status'
+  | 'agent_log'
+  | 'agent_progress'
+  | 'agent_completed'
+  | 'agent_error'
+  | 'task_started'
+  | 'task_completed'
+  | 'task_failed'
+  | 'status_update';
+
+export interface MoltBotMessage {
+  type: MoltBotMessageType;
+  agentId: string;
+  taskId?: string;
+  timestamp: string;
+  data?: Record<string, unknown>;
+}
+
+// =============================================================================
+// MoltBot Client - OpenClaw compliant
+// =============================================================================
+
 export class MoltBotClient {
   private wsUrl: string;
   private httpBaseUrl: string;
@@ -100,14 +121,20 @@ export class MoltBotClient {
   private messageHandlers: Map<string, Set<(message: MoltBotMessage) => void>> = new Map();
   private connectionHandlers: Set<() => void> = new Set();
   private disconnectionHandlers: Set<(error?: Error) => void> = new Set();
-  private statusPollInterval: NodeJS.Timeout | null = null;
-  private lastStatus: MoltBotStatusResponse | null = null;
 
-  // Use the API proxy to avoid CORS issues
+  // Cache for agents list
+  private cachedAgents: OpenClawAgent[] | null = null;
+  private agentsCacheTime: number = 0;
+  private readonly AGENTS_CACHE_TTL = 60000; // 1 minute
+
   constructor(wsUrl: string = 'ws://100.73.167.86:18789', httpBaseUrl: string = '/api/moltbot') {
     this.wsUrl = wsUrl;
     this.httpBaseUrl = httpBaseUrl;
   }
+
+  // ===========================================================================
+  // WebSocket Connection
+  // ===========================================================================
 
   async connect(): Promise<void> {
     if (this.isConnected || this.ws) {
@@ -134,9 +161,8 @@ export class MoltBotClient {
           }
         };
 
-        this.ws.onerror = (event) => {
-          const error = new Error('WebSocket error');
-          reject(error);
+        this.ws.onerror = () => {
+          reject(new Error('WebSocket error'));
         };
 
         this.ws.onclose = () => {
@@ -194,175 +220,191 @@ export class MoltBotClient {
     this.isConnected = false;
   }
 
-  async spawnAgent(taskId: string, agentType: string, projectId?: string, config?: Record<string, unknown>): Promise<SpawnAgentResponse> {
-    // Send task to MoltBot via chat endpoint
-    const taskTitle = config?.title || `Task ${taskId}`;
-    const taskDescription = config?.description || taskTitle;
-    const labels = (config?.labels as string[] | undefined) || [];
+  // ===========================================================================
+  // Agents API (OpenClaw compliant)
+  // ===========================================================================
 
-    // Format message for MoltBot to work on
+  /**
+   * Get list of available agents from MoltBot
+   * An agent is an isolated brain with its own workspace, identity, sessions
+   */
+  async getAgents(): Promise<OpenClawAgent[]> {
+    // Check cache
+    if (this.cachedAgents && Date.now() - this.agentsCacheTime < this.AGENTS_CACHE_TTL) {
+      return this.cachedAgents;
+    }
+
+    const response = await fetch(`${this.httpBaseUrl}/agents`);
+    if (!response.ok) {
+      throw new Error(`Failed to get agents: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    if (!data.success) {
+      throw new Error(data.error?.message || 'Failed to get agents');
+    }
+
+    this.cachedAgents = data.data.agents;
+    this.agentsCacheTime = Date.now();
+    return this.cachedAgents || [];
+  }
+
+  /**
+   * Get the default agent ID
+   */
+  async getDefaultAgentId(): Promise<string> {
+    const agents = await this.getAgents();
+    const defaultAgent = agents.find(a => a.isDefault);
+    return defaultAgent?.id || 'main';
+  }
+
+  // ===========================================================================
+  // Sessions API (OpenClaw compliant)
+  // ===========================================================================
+
+  /**
+   * Get list of sessions
+   * Sessions are conversation contexts within an agent
+   */
+  async getSessions(activeMinutes?: number): Promise<OpenClawSession[]> {
+    const url = activeMinutes
+      ? `${this.httpBaseUrl}/sessions?active=${activeMinutes}`
+      : `${this.httpBaseUrl}/sessions`;
+
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`Failed to get sessions: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    if (!data.success) {
+      throw new Error(data.error?.message || 'Failed to get sessions');
+    }
+
+    return data.data.sessions || [];
+  }
+
+  /**
+   * Build a proper OpenClaw session key
+   * Format: agent:<agentId>:<sessionKey>
+   */
+  buildSessionKey(agentId: string, sessionKey: string): string {
+    return `agent:${agentId}:${sessionKey}`;
+  }
+
+  // ===========================================================================
+  // Agent Run API (OpenClaw compliant)
+  // ===========================================================================
+
+  /**
+   * Send a message to an agent and get response
+   * This uses the proper moltbot agent command
+   *
+   * @param message - The message to send
+   * @param agentId - The agent ID (defaults to 'main')
+   * @param sessionId - The session ID for conversation continuity
+   */
+  async runAgent(
+    message: string,
+    agentId: string = 'main',
+    sessionId?: string
+  ): Promise<AgentRunResponse> {
+    const response = await fetch(`${this.httpBaseUrl}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message,
+        session: sessionId || 'default',
+        agent: agentId,
+      }),
+    });
+
+    const contentType = response.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      const text = await response.text();
+      console.error('Chat API returned non-JSON response:', text.substring(0, 200));
+      throw new Error(`API returned HTML instead of JSON (status: ${response.status})`);
+    }
+
+    const data = await response.json();
+
+    if (!response.ok || data.success === false) {
+      throw new Error(data.error?.message || data.message || response.statusText);
+    }
+
+    return data.data as AgentRunResponse;
+  }
+
+  /**
+   * Spawn a task for an agent to work on
+   * Returns the actual runId from MoltBot (not a fake ID)
+   */
+  async spawnTask(
+    taskTitle: string,
+    taskDescription: string,
+    options: {
+      agentId?: string;
+      sessionId?: string;
+      labels?: string[];
+    } = {}
+  ): Promise<{
+    runId: string;
+    agentId: string;
+    sessionId: string;
+    response: string;
+    status: string;
+  }> {
+    const agentId = options.agentId || await this.getDefaultAgentId();
+    const sessionId = options.sessionId || `task-${Date.now()}`;
+    const labels = options.labels || [];
+
+    // Format message for the agent
     const message = [
       `[Task: ${taskTitle}]`,
       taskDescription !== taskTitle ? taskDescription : '',
       labels.length > 0 ? `Labels: ${labels.join(', ')}` : '',
-      `Agent type: ${agentType}`,
-      `Please work on this task.`,
+      'Please work on this task.',
     ].filter(Boolean).join('\n');
 
     try {
-      const response = await fetch(`${this.httpBaseUrl}/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message,
-          session: projectId || 'default',
-        }),
-      });
+      const result = await this.runAgent(message, agentId, sessionId);
 
-      // Check response
-      const data = await response.json();
-
-      if (!response.ok || data.success === false) {
-        const errorMessage = data?.error?.message || data?.message || response.statusText;
-        throw new Error(errorMessage);
-      }
-
-      // Return a response matching expected interface
-      const agentId = `agent-${taskId}-${Date.now()}`;
       return {
+        runId: result.runId,
         agentId,
-        taskId,
-        status: 'running',
-        createdAt: new Date().toISOString(),
+        sessionId: result.result.meta.agentMeta.sessionId,
+        response: result.result.payloads.map(p => p.text).join('\n'),
+        status: result.status,
       };
     } catch (error) {
-      // Re-throw with better context
-      const message = error instanceof Error ? error.message : String(error);
-      throw new Error(`MoltBot task failed: ${message}`);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      throw new Error(`Failed to spawn task: ${errorMessage}`);
     }
   }
 
-  async getAgentStatus(agentId: string): Promise<AgentStatusResponse> {
-    // Get status from MoltBot's status endpoint
-    const response = await fetch(`${this.httpBaseUrl}/status`);
+  // ===========================================================================
+  // Status & Health APIs
+  // ===========================================================================
 
-    if (!response.ok) {
-      throw new Error(`Failed to get agent status: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-
-    // Map MoltBot status to expected format
-    return {
-      agentId,
-      status: data?.heartbeat?.agents?.[0]?.enabled ? 'running' : 'idle',
-      progress: 0,
-      currentStep: undefined,
-      updatedAt: new Date().toISOString(),
-    };
-  }
-
-  async streamLogs(agentId: string, offset: number = 0): Promise<LogsStreamResponse> {
-    const response = await fetch(`${this.httpBaseUrl}/logs?offset=${offset}`);
-
-    if (!response.ok) {
-      throw new Error(`Failed to stream logs: ${response.statusText}`);
-    }
-
-    const data = await response.json();
-
-    // Map to expected format
-    const logs: AgentLogEntry[] = (data?.logs || []).map((log: { timestamp?: string; level?: string; message?: string }) => ({
-      timestamp: log.timestamp || new Date().toISOString(),
-      level: log.level || 'info',
-      message: log.message || '',
-    }));
-
-    return {
-      agentId,
-      logs,
-      hasMore: false,
-    };
-  }
-
-  async pauseAgent(agentId: string): Promise<void> {
-    // Extract taskId from agentId (format: agent-{taskId}-{timestamp})
-    const taskId = agentId.split('-')[1];
-
-    // Update task status to paused via task/update
-    const response = await fetch(`${this.httpBaseUrl}/task/update`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        taskId: taskId,
-        status: 'todo', // Move back to todo (paused)
-      }),
-    });
-
-    if (!response.ok) {
-      console.warn('Failed to pause via task/update, task may still be running');
-    }
-  }
-
-  async resumeAgent(agentId: string): Promise<void> {
-    // Extract taskId from agentId
-    const taskId = agentId.split('-')[1];
-
-    const response = await fetch(`${this.httpBaseUrl}/task/update`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        taskId: taskId,
-        status: 'inProgress',
-      }),
-    });
-
-    if (!response.ok) {
-      console.warn('Failed to resume via task/update');
-    }
-  }
-
-  async stopAgent(agentId: string): Promise<void> {
-    // Extract taskId from agentId
-    const taskId = agentId.split('-')[1];
-
-    const response = await fetch(`${this.httpBaseUrl}/task/stop`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ taskId }),
-    });
-
-    if (!response.ok) {
-      console.warn('Failed to stop task');
-    }
-  }
-
-  // Get MoltBot system status
   async getStatus(): Promise<MoltBotStatusResponse> {
     const response = await fetch(`${this.httpBaseUrl}/status`);
-
     if (!response.ok) {
       throw new Error(`Failed to get status: ${response.statusText}`);
     }
-
     return response.json();
   }
 
-  // Get tasks list
-  async getTasks(): Promise<MoltBotTask[]> {
-    const response = await fetch(`${this.httpBaseUrl}/tasks`);
-
+  async getHealth(): Promise<{ success: boolean; data: { ok: boolean } }> {
+    const response = await fetch(`${this.httpBaseUrl}/health`);
     if (!response.ok) {
-      throw new Error(`Failed to get tasks: ${response.statusText}`);
+      throw new Error(`Failed to get health: ${response.statusText}`);
     }
-
-    const data = await response.json();
-    return [
-      ...(data?.todo || []),
-      ...(data?.inProgress || []),
-      ...(data?.done || []),
-    ];
+    return response.json();
   }
+
+  // ===========================================================================
+  // Event Handlers
+  // ===========================================================================
 
   onMessage(type: MoltBotMessageType | '*', handler: (message: MoltBotMessage) => void): () => void {
     if (!this.messageHandlers.has(type)) {
@@ -394,6 +436,10 @@ export class MoltBotClient {
     return this.isConnected;
   }
 }
+
+// =============================================================================
+// Singleton Instance
+// =============================================================================
 
 let clientInstance: MoltBotClient | null = null;
 

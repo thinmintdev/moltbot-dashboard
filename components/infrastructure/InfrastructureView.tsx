@@ -35,6 +35,7 @@ interface VM {
 
 interface InfrastructureViewProps {
   vms?: VM[];
+  renderVMActions?: (vm: VM) => React.ReactNode;
 }
 
 const defaultVMs: VM[] = [
@@ -114,6 +115,7 @@ const defaultVMs: VM[] = [
 
 export function InfrastructureView({
   vms = defaultVMs,
+  renderVMActions,
 }: InfrastructureViewProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -270,17 +272,28 @@ export function InfrastructureView({
                       </button>
                     </div>
 
-                    {/* Quick Status Badges */}
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span
-                        className={`inline-block px-2 py-1 rounded text-xs font-medium ${statusColor.bg} ${statusColor.text}`}
-                      >
-                        {vm.status === "online" ? "Online" : "Offline"}
-                      </span>
-                      {vm.lastUpdate && (
-                        <span className="text-xs text-[#71717a]">
-                          {vm.lastUpdate}
+                    {/* Quick Status Badges & Actions */}
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`inline-block px-2 py-1 rounded text-xs font-medium ${statusColor.bg} ${statusColor.text}`}
+                        >
+                          {vm.status === "online" ? "Online" : "Offline"}
                         </span>
+                        {vm.lastUpdate && (
+                          <span className="text-xs text-[#71717a]">
+                            {vm.lastUpdate}
+                          </span>
+                        )}
+                      </div>
+                      {/* VM Control Actions */}
+                      {renderVMActions && (
+                        <div
+                          onClick={(e) => e.stopPropagation()}
+                          className="flex items-center"
+                        >
+                          {renderVMActions(vm)}
+                        </div>
                       )}
                     </div>
                   </div>

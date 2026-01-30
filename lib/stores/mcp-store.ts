@@ -106,15 +106,6 @@ interface MCPState {
 
 const DEFAULT_SERVERS: MCPServer[] = [
   {
-    id: 'proxmox-mcp',
-    name: 'ProxmoxMCP-Plus',
-    type: 'proxmox',
-    url: 'http://100.73.167.86:8811',
-    status: 'disconnected',
-    lastCheck: null,
-    tools: PROXMOX_TOOLS,
-  },
-  {
     id: 'moltbot',
     name: 'MoltBot Gateway',
     type: 'moltbot',
@@ -131,24 +122,6 @@ const DEFAULT_SERVERS: MCPServer[] = [
     status: 'disconnected',
     lastCheck: null,
     tools: BESZEL_TOOLS,
-  },
-  {
-    id: 'homelab-mcp',
-    name: 'Homelab-MCP',
-    type: 'homelab',
-    url: 'http://100.73.167.86:6971',
-    status: 'disconnected',
-    lastCheck: null,
-    tools: HOMELAB_TOOLS,
-  },
-  {
-    id: 'ssh-orchestrator',
-    name: 'SSH Orchestrator',
-    type: 'ssh',
-    url: 'http://100.73.167.86:8822',
-    status: 'disconnected',
-    lastCheck: null,
-    tools: SSH_TOOLS,
   },
 ];
 

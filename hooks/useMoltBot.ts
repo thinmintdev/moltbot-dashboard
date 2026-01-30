@@ -1,7 +1,13 @@
 'use client';
 
 import { useEffect, useRef, useCallback, useState } from 'react';
-import { getMoltBotClient, MoltBotMessage, MoltBotMessageType } from '@/lib/api/moltbot';
+import {
+  getMoltBotClient,
+  MoltBotMessage,
+  MoltBotMessageType,
+  OpenClawAgent,
+  OpenClawSession,
+} from '@/lib/api/moltbot';
 
 export interface UseMoltBotOptions {
   autoConnect?: boolean;
@@ -9,11 +15,12 @@ export interface UseMoltBotOptions {
   onError?: (error: Error) => void;
 }
 
-export interface SpawnAgentOptions {
-  taskId: string;
-  agentType: string;
-  projectId?: string;
-  config?: Record<string, unknown>;
+export interface SpawnTaskOptions {
+  taskTitle: string;
+  taskDescription: string;
+  agentId?: string;
+  sessionId?: string;
+  labels?: string[];
 }
 
 export function useMoltBot(options: UseMoltBotOptions = {}) {
@@ -23,6 +30,8 @@ export function useMoltBot(options: UseMoltBotOptions = {}) {
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const [agents, setAgents] = useState<OpenClawAgent[]>([]);
+  const [sessions, setSessions] = useState<OpenClawSession[]>([]);
   const unsubscribeRef = useRef<Set<() => void>>(new Set());
 
   const handleConnect = useCallback(() => {
@@ -62,13 +71,80 @@ export function useMoltBot(options: UseMoltBotOptions = {}) {
     setIsConnected(false);
   }, []);
 
-  const spawnAgent = useCallback(async (options: SpawnAgentOptions) => {
+  // =========================================================================
+  // Agents API (OpenClaw compliant)
+  // =========================================================================
+
+  const fetchAgents = useCallback(async () => {
     try {
-      const response = await clientRef.current.spawnAgent(
-        options.taskId,
-        options.agentType,
-        options.projectId,
-        options.config
+      const agentsList = await clientRef.current.getAgents();
+      setAgents(agentsList);
+      return agentsList;
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      setError(error);
+      onError?.(error);
+      throw error;
+    }
+  }, [onError]);
+
+  const getDefaultAgentId = useCallback(async () => {
+    try {
+      return await clientRef.current.getDefaultAgentId();
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      setError(error);
+      onError?.(error);
+      throw error;
+    }
+  }, [onError]);
+
+  // =========================================================================
+  // Sessions API (OpenClaw compliant)
+  // =========================================================================
+
+  const fetchSessions = useCallback(async (activeMinutes?: number) => {
+    try {
+      const sessionsList = await clientRef.current.getSessions(activeMinutes);
+      setSessions(sessionsList);
+      return sessionsList;
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      setError(error);
+      onError?.(error);
+      throw error;
+    }
+  }, [onError]);
+
+  // =========================================================================
+  // Agent Run API (OpenClaw compliant)
+  // =========================================================================
+
+  const runAgent = useCallback(async (
+    message: string,
+    agentId?: string,
+    sessionId?: string
+  ) => {
+    try {
+      return await clientRef.current.runAgent(message, agentId, sessionId);
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      setError(error);
+      onError?.(error);
+      throw error;
+    }
+  }, [onError]);
+
+  const spawnTask = useCallback(async (options: SpawnTaskOptions) => {
+    try {
+      const response = await clientRef.current.spawnTask(
+        options.taskTitle,
+        options.taskDescription,
+        {
+          agentId: options.agentId,
+          sessionId: options.sessionId,
+          labels: options.labels,
+        }
       );
       return response;
     } catch (err) {
@@ -79,9 +155,13 @@ export function useMoltBot(options: UseMoltBotOptions = {}) {
     }
   }, [onError]);
 
-  const pauseAgent = useCallback(async (agentId: string) => {
+  // =========================================================================
+  // Status & Health
+  // =========================================================================
+
+  const getStatus = useCallback(async () => {
     try {
-      await clientRef.current.pauseAgent(agentId);
+      return await clientRef.current.getStatus();
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       setError(error);
@@ -90,9 +170,9 @@ export function useMoltBot(options: UseMoltBotOptions = {}) {
     }
   }, [onError]);
 
-  const resumeAgent = useCallback(async (agentId: string) => {
+  const getHealth = useCallback(async () => {
     try {
-      await clientRef.current.resumeAgent(agentId);
+      return await clientRef.current.getHealth();
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       setError(error);
@@ -101,46 +181,19 @@ export function useMoltBot(options: UseMoltBotOptions = {}) {
     }
   }, [onError]);
 
-  const stopAgent = useCallback(async (agentId: string) => {
-    try {
-      await clientRef.current.stopAgent(agentId);
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      setError(error);
-      onError?.(error);
-      throw error;
-    }
-  }, [onError]);
-
-  const getAgentStatus = useCallback(async (agentId: string) => {
-    try {
-      const status = await clientRef.current.getAgentStatus(agentId);
-      return status;
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      setError(error);
-      onError?.(error);
-      throw error;
-    }
-  }, [onError]);
-
-  const streamLogs = useCallback(async (agentId: string, offset?: number) => {
-    try {
-      const logs = await clientRef.current.streamLogs(agentId, offset);
-      return logs;
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      setError(error);
-      onError?.(error);
-      throw error;
-    }
-  }, [onError]);
+  // =========================================================================
+  // Event Subscriptions
+  // =========================================================================
 
   const subscribe = useCallback((messageType: MoltBotMessageType | '*', handler: (message: MoltBotMessage) => void) => {
     const unsubscribe = clientRef.current.onMessage(messageType, handler);
     unsubscribeRef.current.add(unsubscribe);
     return unsubscribe;
   }, []);
+
+  // =========================================================================
+  // Lifecycle
+  // =========================================================================
 
   useEffect(() => {
     const client = clientRef.current;
@@ -156,24 +209,42 @@ export function useMoltBot(options: UseMoltBotOptions = {}) {
       connect();
     }
 
+    // Fetch initial data
+    fetchAgents().catch(() => {});
+    fetchSessions().catch(() => {});
+
     return () => {
       unsubscribeRef.current.forEach(unsub => unsub());
       unsubscribeRef.current.clear();
     };
-  }, [autoConnect, connect, handleConnect, handleDisconnect, handleMessage]);
+  }, [autoConnect, connect, handleConnect, handleDisconnect, handleMessage, fetchAgents, fetchSessions]);
 
   return {
+    // Connection state
     isConnected,
     isConnecting,
     error,
     connect,
     disconnect,
-    spawnAgent,
-    pauseAgent,
-    resumeAgent,
-    stopAgent,
-    getAgentStatus,
-    streamLogs,
+
+    // Agents (OpenClaw compliant)
+    agents,
+    fetchAgents,
+    getDefaultAgentId,
+
+    // Sessions (OpenClaw compliant)
+    sessions,
+    fetchSessions,
+
+    // Agent runs (OpenClaw compliant)
+    runAgent,
+    spawnTask,
+
+    // Status & Health
+    getStatus,
+    getHealth,
+
+    // Subscriptions
     subscribe,
   };
 }

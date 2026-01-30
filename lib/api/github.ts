@@ -28,6 +28,11 @@ export interface GitHubIssue {
   };
 }
 
+export interface GitHubUser {
+  login: string;
+  avatar_url?: string;
+}
+
 export interface GitHubPullRequest {
   id: number;
   number: number;
@@ -39,19 +44,33 @@ export interface GitHubPullRequest {
     name: string;
     color: string;
   }>;
-  assignee: {
-    login: string;
-  } | null;
+  assignee: GitHubUser | null;
+  assignees?: GitHubUser[];
   draft: boolean;
   created_at: string;
   updated_at: string;
   closed_at: string | null;
   merged_at: string | null;
+  mergeable?: boolean | null;
+  merged?: boolean;
   url: string;
   html_url: string;
-  user: {
-    login: string;
+  user: GitHubUser;
+  head: {
+    ref: string;
+    sha: string;
   };
+  base: {
+    ref: string;
+    sha: string;
+  };
+  requested_reviewers?: GitHubUser[];
+  review_comments?: number;
+  comments?: number;
+  commits?: number;
+  additions?: number;
+  deletions?: number;
+  changed_files?: number;
 }
 
 export interface GitHubApiError extends Error {
@@ -163,8 +182,40 @@ export async function fetchIssues(
   return githubFetch<GitHubIssue[]>(endpoint, token);
 }
 
+export type PRState = 'open' | 'closed' | 'all';
+export type PRSort = 'created' | 'updated' | 'popularity' | 'long-running';
+export type SortDirection = 'asc' | 'desc';
+
 /**
- * Fetch open pull requests from a GitHub repository
+ * Fetch pull requests from a GitHub repository with filtering options
+ */
+export async function fetchPullRequests(
+  owner: string,
+  repo: string,
+  options?: {
+    state?: PRState;
+    sort?: PRSort;
+    direction?: SortDirection;
+    page?: number;
+    perPage?: number;
+    token?: string;
+  }
+): Promise<GitHubPullRequest[]> {
+  const {
+    state = 'open',
+    sort = 'updated',
+    direction = 'desc',
+    page = 1,
+    perPage = 30,
+    token,
+  } = options || {};
+
+  const endpoint = `/repos/${owner}/${repo}/pulls?state=${state}&sort=${sort}&direction=${direction}&page=${page}&per_page=${perPage}`;
+  return githubFetch<GitHubPullRequest[]>(endpoint, token);
+}
+
+/**
+ * Fetch open pull requests from a GitHub repository (legacy support)
  */
 export async function fetchPRs(
   owner: string,
@@ -173,8 +224,7 @@ export async function fetchPRs(
   page: number = 1,
   perPage: number = 30
 ): Promise<GitHubPullRequest[]> {
-  const endpoint = `/repos/${owner}/${repo}/pulls?state=open&page=${page}&per_page=${perPage}`;
-  return githubFetch<GitHubPullRequest[]>(endpoint, token);
+  return fetchPullRequests(owner, repo, { state: 'open', page, perPage, token });
 }
 
 /**
